@@ -1,0 +1,15 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform readonly image2D uCur;
+layout(binding = 1, r32f) uniform writeonly image2D uLuma;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 hs = imageSize(uLuma);
+    if (any(greaterThanEqual(p, hs))) return;
+    ivec2 fs = imageSize(uCur);
+    vec3 s = vec3(0.0);
+    for (int dy = 0; dy < 2; dy++)
+        for (int dx = 0; dx < 2; dx++)
+            s += imageLoad(uCur, min(p * 2 + ivec2(dx, dy), fs - 1)).rgb;
+    imageStore(uLuma, p, vec4(dot(s * 0.25, vec3(0.299, 0.587, 0.114))));
+}

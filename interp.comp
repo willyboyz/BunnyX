@@ -1,0 +1,24 @@
+#version 450
+// Frame tengah: mid(x) = mix(prev(x + d), cur(x - d)), d = vektor blok (setengah-res -> setengah jarak penuh).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform readonly image2D uPrev;
+layout(binding = 1, rgba8) uniform readonly image2D uCur;
+layout(binding = 2, rgba8) uniform writeonly image2D uMid;
+layout(binding = 3, std430) readonly buffer MV { ivec4 mv[]; };
+layout(push_constant) uniform PC { ivec2 blocks; } pc;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 fs = imageSize(uCur);
+    if (any(greaterThanEqual(p, fs))) return;
+    ivec2 b = clamp(p / 16, ivec2(0), pc.blocks - 1);
+    ivec2 d = mv[b.y * pc.blocks.x + b.x].xy;
+    vec4 c0 = imageLoad(uCur, p);
+    vec4 p0 = imageLoad(uPrev, p);
+    vec4 a = imageLoad(uPrev, clamp(p + d, ivec2(0), fs - 1));
+    vec4 c = imageLoad(uCur, clamp(p - d, ivec2(0), fs - 1));
+    vec4 mc = 0.5 * (a + c);
+    vec4 plain = 0.5 * (p0 + c0);
+    float err = dot(abs(a.rgb - c.rgb), vec3(1.0 / 3.0));
+    float w = clamp(1.0 - err * 4.0, 0.0, 1.0);   // kalau dua sampel beda jauh (oklusi) -> balik ke blend biasa
+    imageStore(uMid, p, vec4(mix(plain, mc, w).rgb, 1.0));
+}

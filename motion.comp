@@ -1,0 +1,50 @@
+#version 450
+// Block matching di resolusi setengah. 1 thread = 1 blok 8x8 (setara 16x16 piksel asli).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, r32f) uniform readonly image2D uCurL;
+layout(binding = 1, r32f) uniform readonly image2D uPrevL;
+layout(binding = 3, std430) writeonly buffer MV { ivec4 mv[]; };
+layout(push_constant) uniform PC { ivec2 blocks; } pc;
+const int BS = 8;
+const int RANGE = 8;
+
+float sad(ivec2 base, ivec2 d, ivec2 hs) {
+    float s = 0.0;
+    for (int y = 0; y < BS; y += 2) {
+        for (int x = 0; x < BS; x += 2) {
+            ivec2 p = min(base + ivec2(x, y), hs - 1);
+            ivec2 q = clamp(p + d, ivec2(0), hs - 1);
+            s += abs(imageLoad(uCurL, p).x - imageLoad(uPrevL, q).x);
+        }
+    }
+    return s * (1.0 / 16.0);
+}
+float cost(ivec2 base, ivec2 d, ivec2 hs) {
+    return sad(base, d, hs) + 0.004 * float(abs(d.x) + abs(d.y));
+}
+void main() {
+    ivec2 b = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(b, pc.blocks))) return;
+    ivec2 hs = imageSize(uCurL);
+    ivec2 base = b * BS;
+    float s0 = sad(base, ivec2(0), hs);
+    ivec2 best = ivec2(0);
+    float bestC = s0;
+    for (int dy = -RANGE; dy <= RANGE; dy += 2)
+        for (int dx = -RANGE; dx <= RANGE; dx += 2) {
+            ivec2 d = ivec2(dx, dy);
+            float c = cost(base, d, hs);
+            if (c < bestC) { bestC = c; best = d; }
+        }
+    ivec2 c0 = best;
+    for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            ivec2 d = c0 + ivec2(dx, dy);
+            if (any(greaterThan(abs(d), ivec2(RANGE + 1)))) continue;
+            float c = cost(base, d, hs);
+            if (c < bestC) { bestC = c; best = d; }
+        }
+    if (bestC > s0 * 0.85) best = ivec2(0);   // bias ke "tidak bergerak"
+    mv[b.y * pc.blocks.x + b.x] = ivec4(best, int(bestC * 1000.0), 0);
+}
